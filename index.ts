@@ -1,5 +1,4 @@
 import express from 'express'
-import type { Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 
@@ -13,24 +12,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN!
+const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN
 
-app.get('/webhook', (req: Request, res: Response) => {
+app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode']
   const token = req.query['hub.verify_token']
   const challenge = req.query['hub.challenge']
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge)
+    res.status(200).send(challenge)
+  } else {
+    res.sendStatus(403)
   }
-
-  return res.sendStatus(403)
 })
 
-app.post('/webhook', async (req: Request, res: Response) => {
+app.post('/webhook', async (req, res) => {
   const body = req.body
 
-  // Formato simplificado (Make)
   if (body?.from && body?.content) {
     await supabase.from('messages').insert([
       {
@@ -42,7 +40,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
     return res.sendStatus(200)
   }
 
-  // Formato oficial (Meta)
   const messages = body?.entry?.[0]?.changes?.[0]?.value?.messages || []
 
   for (const msg of messages) {
@@ -55,10 +52,10 @@ app.post('/webhook', async (req: Request, res: Response) => {
     ])
   }
 
-  return res.sendStatus(200)
+  res.sendStatus(200)
 })
 
-const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
+const PORT = Number(process.env.PORT) || 3000
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Servidor rodando na porta ${PORT}`)
 })
