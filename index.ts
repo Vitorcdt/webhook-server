@@ -5,7 +5,7 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 const app = express()
-app.use(express.json())
+app.use(express.json({ type: '*/*' }));
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -26,7 +26,7 @@ app.get('/webhook', (req, res) => {
   }
 })
 
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', async (req, res) => { 
   const body = req.body
 
   if (body?.from && body?.content) {
