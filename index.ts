@@ -41,9 +41,11 @@ app.post('/webhook', async (req: Request, res: Response) => {
       from,
       to,
       content,
-      created_at: new Date(Number(timestamp)).toISOString()
+      created_at: new Date(Number(timestamp)).toISOString(),
+      from_role: 'client' // <- valor obrigatório para passar a constraint
     }
   ]);
+  
 
   if (error) {
     console.error('Erro ao salvar mensagem:', error.message);
