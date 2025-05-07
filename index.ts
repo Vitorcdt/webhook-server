@@ -1,4 +1,5 @@
 import express from 'express'
+import type { Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 
@@ -14,30 +15,44 @@ const supabase = createClient(
 
 const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN!
 
-app.get('/webhook', (req, res) => {
+app.get('/webhook', (req: Request, res: Response) => {
   const mode = req.query['hub.mode']
   const token = req.query['hub.verify_token']
   const challenge = req.query['hub.challenge']
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('[Webhook] Verificado com sucesso')
     return res.status(200).send(challenge)
-  } else {
-    return res.sendStatus(403)
   }
+
+  return res.sendStatus(403)
 })
 
-app.post('/webhook', async (req, res) => {
-  const messages = req.body?.entry?.[0]?.changes?.[0]?.value?.messages || []
+app.post('/webhook', async (req: Request, res: Response) => {
+  const body = req.body
+
+  // Formato simplificado (Make)
+  if (body?.from && body?.content) {
+    await supabase.from('messages').insert([
+      {
+        from: body.from,
+        content: body.content,
+        created_at: new Date().toISOString()
+      }
+    ])
+    return res.sendStatus(200)
+  }
+
+  // Formato oficial (Meta)
+  const messages = body?.entry?.[0]?.changes?.[0]?.value?.messages || []
 
   for (const msg of messages) {
     const from = msg.from
     const content = msg.text?.body || '[sem texto]'
     const created_at = new Date().toISOString()
 
-    console.log(`[Mensagem recebida] De: ${from} | Conteúdo: ${content}`)
-
-    await supabase.from('messages').insert([{ from, content, created_at }])
+    await supabase.from('messages').insert([
+      { from, content, created_at }
+    ])
   }
 
   return res.sendStatus(200)
@@ -45,5 +60,5 @@ app.post('/webhook', async (req, res) => {
 
 const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
-  console.log(`Servidor webhook rodando na porta ${PORT}`)
+  console.log(`Servidor rodando na porta ${PORT}`)
 })
