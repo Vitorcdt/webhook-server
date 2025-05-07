@@ -46,7 +46,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
           from,
           to,
           content,
-          created_at: new Date(Number(timestamp)).toISOString(),
+          created_at: new Date(Number(timestamp) * 1000).toISOString(),
           from_role: 'client'
         }
       ]);
