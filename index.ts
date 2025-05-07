@@ -1,3 +1,4 @@
+// webhook-handler.ts
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -6,7 +7,6 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
-
 app.use(express.json());
 
 const supabase = createClient(
@@ -16,7 +16,6 @@ const supabase = createClient(
 
 app.get('/webhook', (req: Request, res: Response) => {
   const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN;
-
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
@@ -30,36 +29,53 @@ app.get('/webhook', (req: Request, res: Response) => {
 });
 
 app.post('/webhook', async (req: Request, res: Response) => {
-  const { from, to, content, timestamp } = req.body;
+  try {
+    const body = req.body;
 
-  if (!from || !content) {
-    console.log('Rejeitado: corpo inválido', req.body);
-    return res.status(400).json({ error: 'Dados inválidos' });
+    if (body.object !== 'whatsapp_business_account') {
+      return res.sendStatus(404);
+    }
+
+    for (const entry of body.entry || []) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        const messages = change.value?.messages;
+        if (!messages) continue;
+
+        for (const msg of messages) {
+          const from = msg.from;
+          const to = change.value.metadata.phone_number_id;
+          const content = msg.text?.body || '[sem texto]';
+          const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+          const msgId = msg.id;
+
+          console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+
+          // Evita duplicidade por ID (pode ser incluído se você salvar msg.id no banco)
+          const { error } = await supabase.from('messages').insert([
+            {
+              from,
+              to,
+              content,
+              created_at: timestamp,
+              from_role: 'client',
+            },
+          ]);
+
+          if (error) {
+            console.error('Erro ao salvar no Supabase:', error.message);
+          }
+        }
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Erro no webhook:', err);
+    res.sendStatus(500);
   }
-
-  const dataToInsert = {
-    from,
-    to: to || 'agent', // fallback padrão
-    content,
-    from_role: 'client',
-    created_at: timestamp
-      ? new Date(Number(timestamp)).toISOString()
-      : new Date().toISOString() // fallback se timestamp vier vazio
-  };
-
-  console.log('[Payload a salvar]', dataToInsert);
-
-  const { error } = await supabase.from('messages').insert([dataToInsert]);
-
-  if (error) {
-    console.error('Erro ao salvar mensagem:', error.message);
-    return res.status(500).json({ error: error.message });
-  }
-
-  res.sendStatus(200);
 });
 
-
 app.listen(port, () => {
-  console.log(`Servidor webhook rodando na porta ${port}`);
+  console.log(`Servidor webhook ativo na porta ${port}`);
 });
