@@ -35,8 +35,30 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    if (body.object !== 'whatsapp_business_account') {
-      return res.sendStatus(404);
+    if (body.object === 'whatsapp_business_account') {
+      // Lógica completa da Meta (entry > changes > messages)
+    } else if (body.from && body.content) {
+      // Lógica direta para Make
+      const { from, to, content, timestamp } = body;
+    
+      const { error } = await supabase.from('messages').insert([
+        {
+          from,
+          to,
+          content,
+          created_at: new Date(Number(timestamp)).toISOString(),
+          from_role: 'client'
+        }
+      ]);
+    
+      if (error) {
+        console.error('Erro ao salvar mensagem (Make):', error.message);
+        return res.status(500).json({ error: 'Erro ao salvar mensagem' });
+      }
+    
+      return res.sendStatus(200);
+    } else {
+      return res.sendStatus(400);
     }
 
     for (const entry of body.entry || []) {
