@@ -2,6 +2,7 @@
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -13,6 +14,8 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const FORWARD_TO_MAKE_URL = process.env.MAKE_WEBHOOK_URL;
 
 app.get('/webhook', (req: Request, res: Response) => {
   const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN;
@@ -51,7 +54,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
           console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
-          // Evita duplicidade por ID (pode ser incluído se você salvar msg.id no banco)
           const { error } = await supabase.from('messages').insert([
             {
               from,
@@ -64,6 +66,22 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
           if (error) {
             console.error('Erro ao salvar no Supabase:', error.message);
+          }
+
+          // Reenvia para o Make se a URL estiver definida
+          if (FORWARD_TO_MAKE_URL) {
+            try {
+              await axios.post(FORWARD_TO_MAKE_URL, {
+                from,
+                to,
+                content,
+                timestamp,
+                msgId
+              });
+              console.log('Mensagem encaminhada para o Make');
+            } catch (err) {
+              console.error('Erro ao reenviar para o Make:', err);
+            }
           }
         }
       }
