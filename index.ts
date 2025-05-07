@@ -33,27 +33,32 @@ app.post('/webhook', async (req: Request, res: Response) => {
   const { from, to, content, timestamp } = req.body;
 
   if (!from || !content) {
+    console.log('Rejeitado: corpo inválido', req.body);
     return res.status(400).json({ error: 'Dados inválidos' });
   }
 
-  const { error } = await supabase.from('messages').insert([
-    {
-      from,
-      to,
-      content,
-      created_at: new Date(Number(timestamp)).toISOString(),
-      from_role: 'client' // <- valor obrigatório para passar a constraint
-    }
-  ]);
-  
+  const dataToInsert = {
+    from,
+    to: to || 'agent', // fallback padrão
+    content,
+    from_role: 'client',
+    created_at: timestamp
+      ? new Date(Number(timestamp)).toISOString()
+      : new Date().toISOString() // fallback se timestamp vier vazio
+  };
+
+  console.log('[Payload a salvar]', dataToInsert);
+
+  const { error } = await supabase.from('messages').insert([dataToInsert]);
 
   if (error) {
     console.error('Erro ao salvar mensagem:', error.message);
-    return res.status(500).json({ error: 'Erro ao salvar mensagem' });
+    return res.status(500).json({ error: error.message });
   }
 
   res.sendStatus(200);
 });
+
 
 app.listen(port, () => {
   console.log(`Servidor webhook rodando na porta ${port}`);
