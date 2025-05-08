@@ -1,3 +1,4 @@
+
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -14,81 +15,117 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const FORWARD_TO_MAKE_URL = process.env.MAKE_WEBHOOK_URL;
+
 app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
     if (body.object === 'whatsapp_business_account') {
-      for (const entry of body.entry || []) {
-        const changes = entry.changes || [];
-        for (const change of changes) {
-          const messages = change.value?.messages;
-          const statuses = change.value?.statuses;
+      // Lógica completa da Meta (entry > changes > messages)
+    } else if (body.from && body.content && body.user_id) {
+      const { from, to, content, timestamp, user_id } = body;
 
-          // Mensagens recebidas
-          if (messages) {
-            for (const msg of messages) {
-              const from = msg.from;
-              const to = change.value.metadata.phone_number_id;
-              const content = msg.text?.body || '[sem texto]';
-              const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
-              const msgId = msg.id;
+      const { error: msgError } = await supabase.from('messages').insert([
+        {
+          from,
+          to,
+          content,
+          created_at: new Date(Number(timestamp) * 1000).toISOString(),
+          from_role: 'client',
+          user_id
+        }
+      ]);
 
-              console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+      if (msgError) {
+        console.error('Erro ao salvar mensagem (Make):', msgError.message);
+        return res.status(500).json({ error: 'Erro ao salvar mensagem' });
+      }
 
-              // Busca o user_id pelo número do contato
-              const { data: contactMatch } = await supabase
-                .from('contacts')
-                .select('user_id')
-                .eq('phone', from)
-                .single();
+      await supabase.from('contacts').upsert([
+        {
+          phone: from,
+          name: from,
+          user_id
+        }
+      ]);
 
-              const user_id = contactMatch?.user_id || null;
+      return res.sendStatus(200);
+    } else {
+      return res.sendStatus(400);
+    }
 
-              const { error } = await supabase.from('messages').insert([
-                {
-                  from,
-                  to,
-                  content,
-                  created_at: timestamp,
-                  from_role: 'client',
-                  meta_msg_id: msgId,
-                  user_id,
-                },
-              ]);
+    for (const entry of body.entry || []) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        const messages = change.value?.messages;
+        if (!messages) continue;
 
-              if (error) {
-                console.error('Erro ao salvar no Supabase:', error.message);
-              }
-            }
+        for (const msg of messages) {
+          const from = msg.from;
+          const to = change.value.metadata.phone_number_id;
+          const content = msg.text?.body || '[sem texto]';
+          const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+          const msgId = msg.id;
+
+          console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+
+          const { data: userRow } = await supabase
+            .from('whatsapp_accounts')
+            .select('user_id')
+            .eq('phone_number_id', to)
+            .maybeSingle();
+
+          if (!userRow) {
+            console.warn('user_id não encontrado para o número:', to);
+            continue;
           }
-          // Atualização de status (ex: "read")
-          if (statuses) {
-            for (const status of statuses) {
-              const msgId = status.id;
-              const statusType = status.status; // ex: 'read', 'delivered', etc.
 
-              if (statusType === 'read') {
-                const { error: updateError } = await supabase
-                  .from('messages')
-                  .update({ status: 'lido' })
-                  .eq('meta_msg_id', msgId);
+          const user_id = userRow.user_id;
 
-                if (updateError) {
-                  console.error('Erro ao atualizar status para lido:', updateError.message);
-                } else {
-                  console.log(`Mensagem ${msgId} marcada como lida.`);
-                }
-              }
+          const { error } = await supabase.from('messages').insert([
+            {
+              from,
+              to,
+              content,
+              created_at: timestamp,
+              from_role: 'client',
+              user_id
+            }
+          ]);
+
+          if (error) {
+            console.error('Erro ao salvar no Supabase:', error.message);
+          }
+
+          await supabase.from('contacts').upsert([
+            {
+              phone: from,
+              name: from,
+              user_id
+            }
+          ]);
+
+          if (FORWARD_TO_MAKE_URL) {
+            try {
+              await axios.post(FORWARD_TO_MAKE_URL, {
+                from,
+                to,
+                content,
+                timestamp,
+                msgId,
+                user_id
+              });
+              console.log('Mensagem encaminhada para o Make');
+            } catch (err) {
+              console.error('Erro ao reenviar para o Make:', err);
             }
           }
         }
       }
-
-      return res.sendStatus(200);
     }
 
-    return res.sendStatus(400);
+    res.sendStatus(200);
   } catch (err) {
     console.error('Erro no webhook:', err);
     res.sendStatus(500);
