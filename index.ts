@@ -44,6 +44,13 @@ app.post('/webhook', async (req: Request, res: Response) => {
           for (const msg of messages) {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
+
+            // Ignora mensagens enviadas pela própria conta (IA/Agente)
+            if (from === to) {
+              console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
+              continue;
+            }
+
             const content = msg.text?.body || '[sem texto]';
             const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
             const msgId = msg.id;
@@ -109,7 +116,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
         }
       }
 
-      return res.sendStatus(200); // Encerra para evitar duplicidade
+      return res.sendStatus(200);
     }
 
     else if (body.from && body.content && body.user_id) {
