@@ -76,7 +76,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
               }
             }
           }
-
           // Atualização de status (ex: "read")
           if (statuses) {
             for (const status of statuses) {
