@@ -43,7 +43,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
             const content = msg.text?.body || '[sem texto]';
-            const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+            const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
