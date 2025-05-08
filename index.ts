@@ -14,91 +14,81 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const FORWARD_TO_MAKE_URL = process.env.MAKE_WEBHOOK_URL;
-
 app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    if (body.object !== 'whatsapp_business_account') {
-      return res.sendStatus(400);
-    }
+    if (body.object === 'whatsapp_business_account') {
+      for (const entry of body.entry || []) {
+        const changes = entry.changes || [];
+        for (const change of changes) {
+          const messages = change.value?.messages;
+          const statuses = change.value?.statuses;
 
-    for (const entry of body.entry || []) {
-      const changes = entry.changes || [];
-      for (const change of changes) {
-        const messages = change.value?.messages;
-        if (!messages) continue;
+          // Mensagens recebidas
+          if (messages) {
+            for (const msg of messages) {
+              const from = msg.from;
+              const to = change.value.metadata.phone_number_id;
+              const content = msg.text?.body || '[sem texto]';
+              const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+              const msgId = msg.id;
 
-        for (const msg of messages) {
-          const from = msg.from;
-          const to = change.value.metadata.phone_number_id;
-          const content = msg.text?.body || '[sem texto]';
-          const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
-          const msgId = msg.id;
+              console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
-          console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+              // Busca o user_id pelo número do contato
+              const { data: contactMatch } = await supabase
+                .from('contacts')
+                .select('user_id')
+                .eq('phone', from)
+                .single();
 
-          const { data: userRow } = await supabase
-            .from('whatsapp_accounts')
-            .select('user_id')
-            .eq('phone_number_id', to)
-            .maybeSingle();
+              const user_id = contactMatch?.user_id || null;
 
-          if (!userRow) {
-            console.warn('user_id não encontrado para o número:', to);
-            continue;
-          }
+              const { error } = await supabase.from('messages').insert([
+                {
+                  from,
+                  to,
+                  content,
+                  created_at: timestamp,
+                  from_role: 'client',
+                  meta_msg_id: msgId,
+                  user_id,
+                },
+              ]);
 
-          const user_id = userRow.user_id;
-
-          const { error: insertError } = await supabase.from('messages').insert([
-            {
-              from,
-              to,
-              content,
-              created_at: timestamp,
-              from_role: 'client',
-              user_id,
-              meta_msg_id: msgId
+              if (error) {
+                console.error('Erro ao salvar no Supabase:', error.message);
+              }
             }
-          ]);
-
-          if (insertError) {
-            console.error('Erro ao salvar mensagem:', insertError.message);
           }
+          // Atualização de status (ex: "read")
+          if (statuses) {
+            for (const status of statuses) {
+              const msgId = status.id;
+              const statusType = status.status; // ex: 'read', 'delivered', etc.
 
-          await supabase.from('contacts').upsert([
-            {
-              phone: from,
-              name: "Contato - 08/05/2025",
-              user_id
-            }
-          ], {
-            onConflict: 'phone, user_id',
-            ignoreDuplicates: true
-          });
+              if (statusType === 'read') {
+                const { error: updateError } = await supabase
+                  .from('messages')
+                  .update({ status: 'lido' })
+                  .eq('meta_msg_id', msgId);
 
-          if (FORWARD_TO_MAKE_URL) {
-            try {
-              await axios.post(FORWARD_TO_MAKE_URL, {
-                from,
-                to,
-                content,
-                timestamp,
-                msgId,
-                user_id
-              });
-              console.log('Mensagem encaminhada para o Make');
-            } catch (err) {
-              console.error('Erro ao reenviar para o Make:', err);
+                if (updateError) {
+                  console.error('Erro ao atualizar status para lido:', updateError.message);
+                } else {
+                  console.log(`Mensagem ${msgId} marcada como lida.`);
+                }
+              }
             }
           }
         }
       }
+
+      return res.sendStatus(200);
     }
 
-    res.sendStatus(200);
+    return res.sendStatus(400);
   } catch (err) {
     console.error('Erro no webhook:', err);
     res.sendStatus(500);
