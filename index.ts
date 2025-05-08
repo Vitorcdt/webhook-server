@@ -14,20 +14,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-app.get('/webhook', (req: Request, res: Response) => {
-  const VERIFY_TOKEN = process.env.META_WHATSAPP_VERIFY_TOKEN;
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode && token && mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('Webhook verificado com sucesso!');
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
-  }
-});
-
 app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
