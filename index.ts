@@ -1,4 +1,3 @@
-
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -21,37 +20,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    if (body.object === 'whatsapp_business_account') {
-      // Lógica completa da Meta (entry > changes > messages)
-    } else if (body.from && body.content && body.user_id) {
-      const { from, to, content, timestamp, user_id } = body;
-
-      const { error: msgError } = await supabase.from('messages').insert([
-        {
-          from,
-          to,
-          content,
-          created_at: new Date(Number(timestamp) * 1000).toISOString(),
-          from_role: 'client',
-          user_id
-        }
-      ]);
-
-      if (msgError) {
-        console.error('Erro ao salvar mensagem (Make):', msgError.message);
-        return res.status(500).json({ error: 'Erro ao salvar mensagem' });
-      }
-
-      await supabase.from('contacts').upsert([
-        {
-          phone: from,
-          name: from,
-          user_id
-        }
-      ]);
-
-      return res.sendStatus(200);
-    } else {
+    if (body.object !== 'whatsapp_business_account') {
       return res.sendStatus(400);
     }
 
@@ -83,28 +52,32 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
           const user_id = userRow.user_id;
 
-          const { error } = await supabase.from('messages').insert([
+          const { error: insertError } = await supabase.from('messages').insert([
             {
               from,
               to,
               content,
               created_at: timestamp,
               from_role: 'client',
-              user_id
+              user_id,
+              meta_msg_id: msgId
             }
           ]);
 
-          if (error) {
-            console.error('Erro ao salvar no Supabase:', error.message);
+          if (insertError) {
+            console.error('Erro ao salvar mensagem:', insertError.message);
           }
 
           await supabase.from('contacts').upsert([
             {
               phone: from,
-              name: from,
+              name: "Contato - 08/05/2025",
               user_id
             }
-          ]);
+          ], {
+            onConflict: 'phone, user_id',
+            ignoreDuplicates: true
+          });
 
           if (FORWARD_TO_MAKE_URL) {
             try {
