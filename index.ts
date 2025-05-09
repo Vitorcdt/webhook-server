@@ -34,7 +34,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    // Webhook da Meta
+    // Verifica se é uma notificação da API oficial da Meta
     if (body.object === 'whatsapp_business_account') {
       for (const entry of body.entry || []) {
         for (const change of entry.changes || []) {
@@ -45,14 +45,14 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
+            // Ignora mensagens enviadas pelo próprio número (agente ou IA)
             if (from === to) {
               console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
               continue;
             }
 
             const content = msg.text?.body || '[sem texto]';
-            const rawTs = Number(msg.timestamp);
-            const timestamp = new Date(rawTs > 1e12 ? rawTs : rawTs * 1000).toISOString();
+            const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
             const msgId = msg.id;
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
@@ -70,35 +70,39 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const user_id = userRow.user_id;
 
-            await supabase.from('messages').insert([{
-              from,
-              to,
-              content,
-              created_at: timestamp,
-              from_role: 'client',
-              user_id,
-              meta_msg_id: msgId
-            }]);
+            const { error: insertError } = await supabase.from('messages').insert([
+              {
+                from,
+                to,
+                content,
+                created_at: timestamp,
+                from_role: 'client',
+                user_id,
+                meta_msg_id: msgId
+              }
+            ]);
 
-            await supabase.from('contacts').upsert([{
-              phone: from,
-              name: `Cliente ${from}`,
-              user_id,
-              created_at: new Date().toISOString()
-            }], {
-              onConflict: 'phone, user_id'
+            if (insertError) {
+              console.error('Erro ao salvar mensagem:', insertError.message);
+            }
+
+            await supabase.from('contacts').upsert([
+              {
+                phone: from,
+                name: `Cliente ${from}`,
+                user_id
+              }
+            ], {
+              onConflict: 'phone, user_id',
+              ignoreDuplicates: true
             });
 
-            // Busca name e photo_url para enviar ao Make
             const { data: contact } = await supabase
               .from('contacts')
               .select('name, photo_url')
               .eq('phone', from)
               .eq('user_id', user_id)
               .maybeSingle();
-
-            const contactName = contact?.name || `Cliente ${from}`;
-            const contactPhoto = contact?.photo_url || null;
 
             if (FORWARD_TO_MAKE_URL) {
               try {
@@ -109,12 +113,12 @@ app.post('/webhook', async (req: Request, res: Response) => {
                   timestamp,
                   msgId,
                   user_id,
-                  name: contactName,
-                  photo_url: contactPhoto
+                  name: contact?.name || `Cliente ${from}`,
+                  photo_url: contact?.photo_url || null
                 });
                 console.log('Mensagem encaminhada para o Make');
-              } catch (err) {
-                console.error('Erro ao reenviar para o Make:', err);
+              } catch (err: any) {
+                console.error('Erro ao reenviar para o Make:', err.message || err);
               }
             }
           }
@@ -124,29 +128,61 @@ app.post('/webhook', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    // Suporte a mensagens manuais via Make
+    // Suporte a mensagens manuais vindas do Make
     else if (body.from && body.content && body.user_id) {
       const { from, to, content, timestamp, user_id } = body;
-      const tsNum = Number(timestamp);
-      const safeTimestamp = new Date(tsNum > 1e12 ? tsNum : tsNum * 1000).toISOString();
 
-      await supabase.from('messages').insert([{
-        from,
-        to,
-        content,
-        created_at: safeTimestamp,
-        from_role: 'client',
-        user_id
-      }]);
+      const { error: msgError } = await supabase.from('messages').insert([
+        {
+          from,
+          to,
+          content,
+          created_at: new Date(Number(timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString(),
+          from_role: 'client',
+          user_id
+        }
+      ]);
 
-      await supabase.from('contacts').upsert([{
-        phone: from,
-        name: `Cliente ${from}`,
-        user_id,
-        created_at: new Date().toISOString()
-      }], {
-        onConflict: 'phone, user_id'
+      if (msgError) {
+        console.error('Erro ao salvar mensagem (Make):', msgError.message);
+        return res.status(500).json({ error: 'Erro ao salvar mensagem' });
+      }
+
+      await supabase.from('contacts').upsert([
+        {
+          phone: from,
+          name: `Cliente ${from}`,
+          user_id
+        }
+      ], {
+        onConflict: 'phone, user_id',
+        ignoreDuplicates: true
       });
+
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('name, photo_url')
+        .eq('phone', from)
+        .eq('user_id', user_id)
+        .maybeSingle();
+
+      if (FORWARD_TO_MAKE_URL) {
+        try {
+          await axios.post(FORWARD_TO_MAKE_URL, {
+            from,
+            to,
+            content,
+            timestamp,
+            msgId: null,
+            user_id,
+            name: contact?.name || `Cliente ${from}`,
+            photo_url: contact?.photo_url || null
+          });
+          console.log('Mensagem (Make) encaminhada com nome e foto');
+        } catch (err: any) {
+          console.error('Erro ao reenviar (Make):', err.message || err);
+        }
+      }
 
       return res.sendStatus(200);
     }
