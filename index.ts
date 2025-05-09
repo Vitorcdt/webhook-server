@@ -34,10 +34,10 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
+    // Verifica se é uma notificação da API oficial da Meta
     if (body.object === 'whatsapp_business_account') {
       for (const entry of body.entry || []) {
-        const changes = entry.changes || [];
-        for (const change of changes) {
+        for (const change of entry.changes || []) {
           const messages = change.value?.messages;
           if (!messages) continue;
 
@@ -45,7 +45,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            // Ignora mensagens enviadas pela própria conta (IA/Agente)
+            // Ignora mensagens enviadas pelo próprio número (agente ou IA)
             if (from === to) {
               console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
               continue;
@@ -57,6 +57,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
+            // Busca o user_id vinculado ao número de telefone da empresa
             const { data: userRow } = await supabase
               .from('whatsapp_accounts')
               .select('user_id')
@@ -70,6 +71,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const user_id = userRow.user_id;
 
+            // Salva a mensagem na tabela messages
             const { error: insertError } = await supabase.from('messages').insert([
               {
                 from,
@@ -86,10 +88,11 @@ app.post('/webhook', async (req: Request, res: Response) => {
               console.error('Erro ao salvar mensagem:', insertError.message);
             }
 
+            // Salva ou atualiza o contato
             await supabase.from('contacts').upsert([
               {
                 phone: from,
-                name: "Contato - 08/05/2025",
+                name: `Cliente ${from}`,
                 user_id
               }
             ], {
@@ -97,6 +100,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
               ignoreDuplicates: true
             });
 
+            // Encaminha para o Make (se definido)
             if (FORWARD_TO_MAKE_URL) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
@@ -119,6 +123,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
+    // Suporte a mensagens manuais vindas do Make
     else if (body.from && body.content && body.user_id) {
       const { from, to, content, timestamp, user_id } = body;
 
@@ -141,7 +146,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
       await supabase.from('contacts').upsert([
         {
           phone: from,
-          name: "Contato - 08/05/2025",
+          name: `Cliente ${from}`,
           user_id
         }
       ], {
