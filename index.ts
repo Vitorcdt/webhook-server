@@ -34,7 +34,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    // Verifica se é uma notificação da API oficial da Meta
+    // Mensagem vinda da API oficial do WhatsApp
     if (body.object === 'whatsapp_business_account') {
       for (const entry of body.entry || []) {
         for (const change of entry.changes || []) {
@@ -45,19 +45,18 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            // Ignora mensagens enviadas pelo próprio número (agente ou IA)
             if (from === to) {
               console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
               continue;
             }
 
             const content = msg.text?.body || '[sem texto]';
-            const timestamp = new Date(Number(msg.timestamp) * 1000).toISOString();
+            const rawTs = Number(msg.timestamp);
+            const timestamp = new Date(rawTs > 1e12 ? rawTs : rawTs * 1000).toISOString();
             const msgId = msg.id;
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
-            // Busca o user_id vinculado ao número de telefone da empresa
             const { data: userRow } = await supabase
               .from('whatsapp_accounts')
               .select('user_id')
@@ -71,7 +70,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const user_id = userRow.user_id;
 
-            // Salva a mensagem na tabela messages
             const { error: insertError } = await supabase.from('messages').insert([
               {
                 from,
@@ -88,7 +86,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
               console.error('Erro ao salvar mensagem:', insertError.message);
             }
 
-            // Salva ou atualiza o contato
             await supabase.from('contacts').upsert([
               {
                 phone: from,
@@ -100,7 +97,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
               ignoreDuplicates: true
             });
 
-            // Encaminha para o Make (se definido)
             if (FORWARD_TO_MAKE_URL) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
@@ -123,16 +119,19 @@ app.post('/webhook', async (req: Request, res: Response) => {
       return res.sendStatus(200);
     }
 
-    // Suporte a mensagens manuais vindas do Make
+    // Mensagem enviada manualmente via Make
     else if (body.from && body.content && body.user_id) {
       const { from, to, content, timestamp, user_id } = body;
+
+      const tsNum = Number(timestamp);
+      const safeTimestamp = new Date(tsNum > 1e12 ? tsNum : tsNum * 1000).toISOString();
 
       const { error: msgError } = await supabase.from('messages').insert([
         {
           from,
           to,
           content,
-          created_at: new Date(Number(timestamp) * 1000).toISOString(),
+          created_at: safeTimestamp,
           from_role: 'client',
           user_id
         }
