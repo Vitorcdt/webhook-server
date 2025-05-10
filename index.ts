@@ -102,12 +102,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
               .eq('user_id', user_id)
               .maybeSingle();
 
-            const isClient = from !== to;
-            const iaAtivada = contact?.ai_enabled === true || contact?.ai_enabled === "true";
-
-            console.log("🔍 IA Ativada:", iaAtivada, "| É cliente:", isClient);
-
-            if (FORWARD_TO_MAKE_URL && isClient && iaAtivada) {
+            if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true && from !== 'attendant') {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
                   from,
@@ -119,12 +114,12 @@ app.post('/webhook', async (req: Request, res: Response) => {
                   name: contact.name || `Cliente ${from}`,
                   photo_url: contact.photo_url || null
                 });
-                console.log('✅ Mensagem encaminhada para o Make');
+                console.log('Mensagem encaminhada para o Make');
               } catch (err: any) {
-                console.error('❌ Erro ao reenviar para o Make:', err.message || err);
+                console.error('Erro ao reenviar para o Make:', err.message || err);
               }
             } else {
-              console.log('⛔ Mensagem ignorada — IA desativada ou não é do cliente.');
+              console.log('IA desativada ou remetente é atendente — mensagem não enviada ao Make.');
             }
           }
         }
@@ -171,7 +166,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
         .eq('user_id', user_id)
         .maybeSingle();
 
-      if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true) {
+      if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true && from !== 'attendant') {
         try {
           await axios.post(FORWARD_TO_MAKE_URL, {
             from,
@@ -188,7 +183,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
           console.error('Erro ao reenviar (Make):', err.message || err);
         }
       } else {
-        console.log('IA desativada — mensagem não enviada ao Make.');
+        console.log('IA desativada ou remetente é atendente — mensagem (Make) não enviada.');
       }
 
       return res.sendStatus(200);
