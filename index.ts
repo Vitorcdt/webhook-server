@@ -102,7 +102,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
               .eq('user_id', user_id)
               .maybeSingle();
 
-            if (contact?.ai_enabled && FORWARD_TO_MAKE_URL) {
+            if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
                   from,
@@ -118,6 +118,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
               } catch (err: any) {
                 console.error('Erro ao reenviar para o Make:', err.message || err);
               }
+            } else {
+              console.log('IA desativada — mensagem não enviada ao Make.');
             }
           }
         }
@@ -164,7 +166,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
         .eq('user_id', user_id)
         .maybeSingle();
 
-      if (contact?.ai_enabled && FORWARD_TO_MAKE_URL) {
+      if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true) {
         try {
           await axios.post(FORWARD_TO_MAKE_URL, {
             from,
@@ -180,6 +182,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
         } catch (err: any) {
           console.error('Erro ao reenviar (Make):', err.message || err);
         }
+      } else {
+        console.log('IA desativada — mensagem não enviada ao Make.');
       }
 
       return res.sendStatus(200);
