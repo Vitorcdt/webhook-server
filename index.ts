@@ -44,8 +44,9 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            if (from === to) {
-              console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
+            // Ignorar mensagens enviadas pelo próprio número oficial
+            if (from === to || from === 'attendant') {
+              console.log("Ignorando mensagem do número oficial ou do atendente");
               continue;
             }
 
@@ -68,29 +69,25 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const user_id = userRow.user_id;
 
-            const { error: insertError } = await supabase.from('messages').insert([
-              {
-                from,
-                to,
-                content,
-                created_at: timestamp,
-                from_role: 'client',
-                user_id,
-                meta_msg_id: msgId
-              }
-            ]);
+            const { error: insertError } = await supabase.from('messages').insert([{
+              from,
+              to,
+              content,
+              created_at: timestamp,
+              from_role: 'client',
+              user_id,
+              meta_msg_id: msgId
+            }]);
 
             if (insertError) {
               console.error('Erro ao salvar mensagem:', insertError.message);
             }
 
-            await supabase.from('contacts').upsert([
-              {
-                phone: from,
-                name: `Cliente ${from}`,
-                user_id
-              }
-            ], {
+            await supabase.from('contacts').upsert([{
+              phone: from,
+              name: `Cliente ${from}`,
+              user_id
+            }], {
               onConflict: 'phone, user_id',
               ignoreDuplicates: true
             });
@@ -102,7 +99,12 @@ app.post('/webhook', async (req: Request, res: Response) => {
               .eq('user_id', user_id)
               .maybeSingle();
 
-            if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true && from !== 'attendant') {
+            // 👉 Envia para o Make apenas se IA estiver ativada e não for do atendente
+            if (
+              FORWARD_TO_MAKE_URL &&
+              contact?.ai_enabled === true &&
+              from !== 'attendant'
+            ) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
                   from,
@@ -119,7 +121,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
                 console.error('Erro ao reenviar para o Make:', err.message || err);
               }
             } else {
-              console.log('IA desativada ou remetente é atendente — mensagem não enviada ao Make.');
+              console.log('IA desativada ou mensagem do atendente — não encaminhada.');
             }
           }
         }
@@ -132,29 +134,25 @@ app.post('/webhook', async (req: Request, res: Response) => {
     else if (body.from && body.content && body.user_id) {
       const { from, to, content, timestamp, user_id } = body;
 
-      const { error: msgError } = await supabase.from('messages').insert([
-        {
-          from,
-          to,
-          content,
-          created_at: new Date(Number(timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString(),
-          from_role: 'client',
-          user_id
-        }
-      ]);
+      const { error: msgError } = await supabase.from('messages').insert([{
+        from,
+        to,
+        content,
+        created_at: new Date(Number(timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString(),
+        from_role: 'client',
+        user_id
+      }]);
 
       if (msgError) {
         console.error('Erro ao salvar mensagem (Make):', msgError.message);
         return res.status(500).json({ error: 'Erro ao salvar mensagem' });
       }
 
-      await supabase.from('contacts').upsert([
-        {
-          phone: from,
-          name: `Cliente ${from}`,
-          user_id
-        }
-      ], {
+      await supabase.from('contacts').upsert([{
+        phone: from,
+        name: `Cliente ${from}`,
+        user_id
+      }], {
         onConflict: 'phone, user_id',
         ignoreDuplicates: true
       });
@@ -166,7 +164,11 @@ app.post('/webhook', async (req: Request, res: Response) => {
         .eq('user_id', user_id)
         .maybeSingle();
 
-      if (FORWARD_TO_MAKE_URL && contact?.ai_enabled === true && from !== 'attendant') {
+      if (
+        FORWARD_TO_MAKE_URL &&
+        contact?.ai_enabled === true &&
+        from !== 'attendant'
+      ) {
         try {
           await axios.post(FORWARD_TO_MAKE_URL, {
             from,
@@ -183,7 +185,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
           console.error('Erro ao reenviar (Make):', err.message || err);
         }
       } else {
-        console.log('IA desativada ou remetente é atendente — mensagem (Make) não enviada.');
+        console.log('IA desativada ou mensagem do atendente — não encaminhada.');
       }
 
       return res.sendStatus(200);
