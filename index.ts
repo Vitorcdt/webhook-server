@@ -34,7 +34,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
   try {
     const body = req.body;
 
-    // Verifica se é uma notificação da API oficial da Meta
     if (body.object === 'whatsapp_business_account') {
       for (const entry of body.entry || []) {
         for (const change of entry.changes || []) {
@@ -45,7 +44,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            // Ignora mensagens enviadas pelo próprio número (agente ou IA)
             if (from === to) {
               console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
               continue;
@@ -99,12 +97,12 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const { data: contact } = await supabase
               .from('contacts')
-              .select('name, photo_url')
+              .select('name, photo_url, ai_enabled')
               .eq('phone', from)
               .eq('user_id', user_id)
               .maybeSingle();
 
-            if (FORWARD_TO_MAKE_URL) {
+            if (contact?.ai_enabled && FORWARD_TO_MAKE_URL) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
                   from,
@@ -113,8 +111,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
                   timestamp,
                   msgId,
                   user_id,
-                  name: contact?.name || `Cliente ${from}`,
-                  photo_url: contact?.photo_url || null
+                  name: contact.name || `Cliente ${from}`,
+                  photo_url: contact.photo_url || null
                 });
                 console.log('Mensagem encaminhada para o Make');
               } catch (err: any) {
@@ -161,12 +159,12 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
       const { data: contact } = await supabase
         .from('contacts')
-        .select('name, photo_url')
+        .select('name, photo_url, ai_enabled')
         .eq('phone', from)
         .eq('user_id', user_id)
         .maybeSingle();
 
-      if (FORWARD_TO_MAKE_URL) {
+      if (contact?.ai_enabled && FORWARD_TO_MAKE_URL) {
         try {
           await axios.post(FORWARD_TO_MAKE_URL, {
             from,
@@ -175,8 +173,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
             timestamp,
             msgId: null,
             user_id,
-            name: contact?.name || `Cliente ${from}`,
-            photo_url: contact?.photo_url || null
+            name: contact.name || `Cliente ${from}`,
+            photo_url: contact.photo_url || null
           });
           console.log('Mensagem (Make) encaminhada com nome e foto');
         } catch (err: any) {
