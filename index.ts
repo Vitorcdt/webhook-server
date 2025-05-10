@@ -44,8 +44,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            if (from === to || from === 'attendant') {
-              console.log('Ignorando mensagem do número oficial ou do atendente');
+            if (from === to || typeof from !== 'string') {
+              console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
               continue;
             }
 
@@ -68,7 +68,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             const user_id = userRow.user_id;
 
-            await supabase.from('messages').insert([{
+            const { error: insertError } = await supabase.from('messages').insert([{
               from,
               to,
               content,
@@ -77,6 +77,10 @@ app.post('/webhook', async (req: Request, res: Response) => {
               user_id,
               meta_msg_id: msgId
             }]);
+
+            if (insertError) {
+              console.error('Erro ao salvar mensagem:', insertError.message);
+            }
 
             await supabase.from('contacts').upsert([{
               phone: from,
@@ -94,9 +98,11 @@ app.post('/webhook', async (req: Request, res: Response) => {
               .eq('user_id', user_id)
               .maybeSingle();
 
-            const isFromAttendant = ['attendant', to].includes(from);
-
-            if (FORWARD_TO_MAKE_URL && contact?.ai_enabled && !isFromAttendant) {
+            if (
+              FORWARD_TO_MAKE_URL &&
+              contact?.ai_enabled === true &&
+              !from.toLowerCase().includes('attendant')
+            ) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
                   from,
@@ -117,60 +123,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
             }
           }
         }
-      }
-
-      return res.sendStatus(200);
-    }
-
-    // Suporte a mensagens manuais vindas do Make
-    else if (body.from && body.content && body.user_id) {
-      const { from, to, content, timestamp, user_id } = body;
-
-      await supabase.from('messages').insert([{
-        from,
-        to,
-        content,
-        created_at: new Date(Number(timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString(),
-        from_role: 'client',
-        user_id
-      }]);
-
-      await supabase.from('contacts').upsert([{
-        phone: from,
-        name: `Cliente ${from}`,
-        user_id
-      }], {
-        onConflict: 'phone, user_id',
-        ignoreDuplicates: true
-      });
-
-      const { data: contact } = await supabase
-        .from('contacts')
-        .select('name, photo_url, ai_enabled')
-        .eq('phone', from)
-        .eq('user_id', user_id)
-        .maybeSingle();
-
-      const isFromAttendant = ['attendant', to].includes(from);
-
-      if (FORWARD_TO_MAKE_URL && contact?.ai_enabled && !isFromAttendant) {
-        try {
-          await axios.post(FORWARD_TO_MAKE_URL, {
-            from,
-            to,
-            content,
-            timestamp,
-            msgId: null,
-            user_id,
-            name: contact.name || `Cliente ${from}`,
-            photo_url: contact.photo_url || null
-          });
-          console.log('Mensagem (Make) encaminhada com nome e foto');
-        } catch (err: any) {
-          console.error('Erro ao reenviar (Make):', err.message || err);
-        }
-      } else {
-        console.log('IA desativada ou mensagem do atendente — não encaminhada.');
       }
 
       return res.sendStatus(200);
