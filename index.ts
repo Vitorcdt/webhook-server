@@ -44,8 +44,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
 
-            if (from === to || typeof from !== 'string') {
-              console.log("Ignorando mensagem enviada pelo número oficial (IA/Agente)");
+            if (from === to) {
+              console.log("Ignorando mensagem do número oficial");
               continue;
             }
 
@@ -101,7 +101,8 @@ app.post('/webhook', async (req: Request, res: Response) => {
             if (
               FORWARD_TO_MAKE_URL &&
               contact?.ai_enabled === true &&
-              !from.toLowerCase().includes('attendant')
+              !from.startsWith('attendant') &&
+              from !== 'attendant'
             ) {
               try {
                 await axios.post(FORWARD_TO_MAKE_URL, {
