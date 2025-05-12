@@ -139,7 +139,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
 // Adicionando o endpoint /ia-response de forma segura
 app.post("/ia-response", async (req: Request, res: Response) => {
-  const { resposta, tokens_usados, user_id, phone } = req.body;
+  const {tokens_usados, user_id, phone } = req.body;
 
   if (!tokens_usados || !user_id || !phone) {
     return res.status(400).json({ error: "Dados incompletos." });
