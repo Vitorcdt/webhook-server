@@ -165,19 +165,7 @@ app.post("/ia-response", async (req: Request, res: Response) => {
 
     return res.status(403).json({ error: "Créditos de IA insuficientes." });
   }
-
-  if (resposta) {
-    await supabase.from("messages").insert([
-      {
-        from: "agent",
-        to: phone,
-        content: resposta,
-        from_role: "agent",
-        user_id,
-      },
-    ]);
-  }
-
+  
   await supabase
     .from("users")
     .update({ ia_credits_used: ia_credits_used + tokens_usados })
