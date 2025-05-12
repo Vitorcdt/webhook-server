@@ -144,9 +144,9 @@ app.listen(port, () => {
 app.post("/ia-response", async (req: Request, res: Response) => {
   const { resposta, tokens_usados, user_id, phone } = req.body;
 
-  if (!resposta || !tokens_usados || !user_id || !phone) {
-    return res.status(400).json({ error: "Dados incompletos." });
-  }
+  if (!tokens_usados || !user_id || !phone) {
+  return res.status(400).json({ error: "Dados incompletos." });
+}
 
   const { data: userData, error: userError } = await supabase
     .from("users")
