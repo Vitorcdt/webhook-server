@@ -1,3 +1,4 @@
+
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
@@ -80,58 +81,6 @@ app.post("/ia-response", async (req: Request, res: Response) => {
   return res.status(200).json({ success: true });
 });
 
-
 app.listen(port, () => {
   console.log(`Servidor webhook ativo na porta ${port}`);
-});
-
-
-app.post("/ia-response", async (req: Request, res: Response) => {
-  const { resposta, tokens_usados, user_id, phone } = req.body;
-
-  if (!tokens_usados || !user_id || !phone) {
-  return res.status(400).json({ error: "Dados incompletos." });
-}
-
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("credits, ia_credits_used")
-    .eq("id", user_id)
-    .single();
-
-  if (userError || !userData) {
-    return res.status(500).json({ error: "Usuário não encontrado." });
-  }
-
-  const { credits, ia_credits_used } = userData;
-
-  if (ia_credits_used + tokens_usados > credits) {
-    await supabase
-      .from("users")
-      .update({ out_of_ia_credits: true })
-      .eq("id", user_id);
-
-    return res.status(403).json({ error: "Créditos de IA insuficientes." });
-  }
-
-  const { error: insertError } = await supabase.from("messages").insert([
-    {
-      from: "agent",
-      to: phone,
-      content: resposta,
-      from_role: "agent",
-      user_id,
-    },
-  ]);
-
-  if (insertError) {
-    return res.status(500).json({ error: "Erro ao salvar mensagem." });
-  }
-
-  await supabase
-    .from("users")
-    .update({ ia_credits_used: ia_credits_used + tokens_usados })
-    .eq("id", user_id);
-
-  return res.status(200).json({ success: true });
 });
