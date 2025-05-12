@@ -139,11 +139,15 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
 // Adicionando o endpoint /ia-response de forma segura
 app.post("/ia-response", async (req: Request, res: Response) => {
-  const {tokens_usados, user_id, phone } = req.body;
 
-  if (!tokens_usados || !user_id || !phone) {
-    return res.status(400).json({ error: "Dados incompletos." });
-  }
+  const tokens_usados = Number(req.body.tokens_usados);
+  const user_id = String(req.body.user_id);
+  const phone = String(req.body.phone);
+
+if (!tokens_usados || !user_id || !phone) {
+  console.log('[IA-RESPONSE] Dados incompletos recebidos:', { tokens_usados, user_id, phone });
+  return res.status(400).json({ error: "Dados incompletos." });
+}
 
   const { data: userData, error: userError } = await supabase
     .from("users")
@@ -165,7 +169,7 @@ app.post("/ia-response", async (req: Request, res: Response) => {
 
     return res.status(403).json({ error: "Créditos de IA insuficientes." });
   }
-  
+
   await supabase
     .from("users")
     .update({ ia_credits_used: ia_credits_used + tokens_usados })
