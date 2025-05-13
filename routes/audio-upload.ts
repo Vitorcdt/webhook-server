@@ -29,7 +29,7 @@ router.post("/audio-upload", upload.single("audio"), async (req, res) => {
         .toFormat("ogg")
         .audioCodec("libopus")
         .on("end", () => resolve())
-        .on("error", (err) => reject(err))
+        .on("error", (err: unknown) => reject(err as Error))
         .save(oggPath);
     });
 
