@@ -3,12 +3,14 @@ import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import audioUploadRouter from "./routes/audio-upload";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
+app.use("/api", audioUploadRouter);
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -171,11 +173,18 @@ if (!tokens_usados || !user_id || !phone) {
   }
 
   await supabase
-    .from("users")
-    .update({ ia_credits_used: ia_credits_used + tokens_usados })
-    .eq("id", user_id);
+  .from("users")
+  .update({ ia_credits_used: ia_credits_used + tokens_usados })
+  .eq("id", user_id);
 
-  return res.status(200).json({ success: true });
+await supabase
+  .from("contacts")
+  .update({ ai_enabled: false })
+  .eq("phone", phone)
+  .eq("user_id", user_id);
+
+return res.status(200).json({ success: true });
+
 });
 
 app.listen(port, () => {
