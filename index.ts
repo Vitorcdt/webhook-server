@@ -4,13 +4,20 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import audioUploadRouter from "./routes/audio-upload";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
-app.use(express.json());
-app.use("/api", audioUploadRouter);
+ const port = process.env.PORT || 3000;
+ app.use(express.json());
+ app.use(cors({
+   origin: "https://turios-ia.vercel.app",
+   methods: ["GET", "POST"],
+   allowedHeaders: ["Content-Type"],
+ }));
+  app.use("/api", audioUploadRouter);
+
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
