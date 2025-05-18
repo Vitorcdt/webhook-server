@@ -5,8 +5,13 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import audioUploadRouter from "./routes/audio-upload";
 import cors from "cors";
+import Stripe from "stripe";
 
 dotenv.config();
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16" as any, // força ignorar a tipagem rígida
+});
 
 const app = express();
  const port = process.env.PORT || 3000;
@@ -192,6 +197,28 @@ await supabase
 
 return res.status(200).json({ success: true });
 
+});
+
+app.post("/create-checkout-session", async (req: Request, res: Response) => {
+  const { priceId } = req.body;
+
+  if (!priceId) {
+    return res.status(400).json({ error: "priceId é obrigatório." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: process.env.SUCCESS_URL || "https://turios.com.br/sucesso",
+      cancel_url: process.env.CANCEL_URL || "https://turios.com.br/cancelado",
+    });
+
+    return res.json({ url: session.url });
+  } catch (err: any) {
+    console.error("Erro ao criar sessão do Stripe:", err.message);
+    return res.status(500).json({ error: "Erro ao criar sessão de pagamento." });
+  }
 });
 
 app.listen(port, () => {
