@@ -16,6 +16,43 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.post("/stripe-webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"]!;
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+  let event: Stripe.Event;
+
+  try {
+    event = Stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err: any) {
+    console.error("⚠️ Erro ao verificar assinatura do webhook:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const user_id = session.metadata?.user_id;
+
+    if (!user_id) {
+      console.warn("user_id ausente na sessão de pagamento.");
+      return res.status(400).send("Faltando metadata user_id");
+    }
+
+    await supabase
+      .from("users")
+      .update({
+        credits: 1000,
+        ia_credits_used: 0,
+        out_of_ia_credits: false,
+      })
+      .eq("id", user_id);
+
+    console.log("✅ Créditos recarregados para user_id:", user_id);
+  }
+
+  res.status(200).send("OK");
+});
+
 app.use(express.json());
 app.use(cors({
   origin: "https://turios-ia.vercel.app",
@@ -217,43 +254,6 @@ app.post("/create-checkout-session", async (req: Request, res: Response) => {
     console.error("Erro ao criar sessão do Stripe:", err.message);
     return res.status(500).json({ error: "Erro ao criar sessão de pagamento." });
   }
-});
-
-app.post("/stripe-webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
-  const sig = req.headers["stripe-signature"]!;
-  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-
-  let event: Stripe.Event;
-
-  try {
-    event = Stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-  } catch (err: any) {
-    console.error("⚠️ Erro ao verificar assinatura do webhook:", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const user_id = session.metadata?.user_id;
-
-    if (!user_id) {
-      console.warn("user_id ausente na sessão de pagamento.");
-      return res.status(400).send("Faltando metadata user_id");
-    }
-
-    await supabase
-      .from("users")
-      .update({
-        credits: 1000,
-        ia_credits_used: 0,
-        out_of_ia_credits: false,
-      })
-      .eq("id", user_id);
-
-    console.log("✅ Créditos recarregados para user_id:", user_id);
-  }
-
-  res.status(200).send("OK");
 });
 
 app.listen(port, () => {
