@@ -95,17 +95,35 @@ app.post('/webhook', async (req: Request, res: Response) => {
           for (const msg of messages) {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
-
             if (from === to) {
+
               console.log("Ignorando mensagem do número oficial");
               continue;
             }
-
+            
             const content = msg.text?.body || '[sem texto]';
             const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
             const msgId = msg.id;
+            let user_id = entry.id || null;
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+
+            try {
+              await supabase.rpc("http_post", {
+                url: FORWARD_TO_MAKE_URL,
+                body: {
+                  from,
+                  to,
+                  content,
+                  timestamp,
+                  user_id,
+                },
+              });
+              console.log("✅ Mensagem enviada ao Make com sucesso");
+            } catch (error: any) {
+
+              console.error("❌ Erro ao enviar para o Make:", error.message);
+            }
 
             const { data: userRow } = await supabase
               .from('whatsapp_accounts')
@@ -118,7 +136,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
               continue;
             }
 
-            const user_id = userRow.user_id;
+            user_id = userRow.user_id;
 
             const { error: insertError } = await supabase.from('messages').insert([{
               from,
