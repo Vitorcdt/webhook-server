@@ -1,23 +1,65 @@
-
 import express, { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import audioUploadRouter from "./routes/audio-upload";
 import cors from "cors";
+import Stripe from "stripe";
+import bodyParser from "body-parser";
 
 dotenv.config();
 
-const app = express();
- const port = process.env.PORT || 3000;
- app.use(express.json());
- app.use(cors({
-   origin: "https://turios-ia.vercel.app",
-   methods: ["GET", "POST"],
-   allowedHeaders: ["Content-Type"],
- }));
-  app.use("/api", audioUploadRouter);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16" as any,
+});
 
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.post("/stripe-webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"]!;
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+  let event: Stripe.Event;
+
+  try {
+    event = Stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err: any) {
+    console.error("⚠️ Erro ao verificar assinatura do webhook:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const user_id = session.metadata?.user_id;
+
+    if (!user_id) {
+      console.warn("user_id ausente na sessão de pagamento.");
+      return res.status(400).send("Faltando metadata user_id");
+    }
+
+    await supabase
+      .from("users")
+      .update({
+        credits: 1000,
+        ia_credits_used: 0,
+        out_of_ia_credits: false,
+      })
+      .eq("id", user_id);
+
+    console.log("✅ Créditos recarregados para user_id:", user_id);
+  }
+
+  res.status(200).send("OK");
+});
+
+app.use(express.json());
+app.use(cors({
+  origin: "https://turios-ia.vercel.app",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"],
+}));
+app.use("/api", audioUploadRouter);
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -53,17 +95,35 @@ app.post('/webhook', async (req: Request, res: Response) => {
           for (const msg of messages) {
             const from = msg.from;
             const to = change.value.metadata.phone_number_id;
-
             if (from === to) {
+
               console.log("Ignorando mensagem do número oficial");
               continue;
             }
-
+            
             const content = msg.text?.body || '[sem texto]';
             const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
             const msgId = msg.id;
+            let user_id = entry.id || null;
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+
+            try {
+              await supabase.rpc("http_post", {
+                url: FORWARD_TO_MAKE_URL,
+                body: {
+                  from,
+                  to,
+                  content,
+                  timestamp,
+                  user_id,
+                },
+              });
+              console.log("✅ Mensagem enviada ao Make com sucesso");
+            } catch (error: any) {
+
+              console.error("❌ Erro ao enviar para o Make:", error.message);
+            }
 
             const { data: userRow } = await supabase
               .from('whatsapp_accounts')
@@ -76,7 +136,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
               continue;
             }
 
-            const user_id = userRow.user_id;
+            user_id = userRow.user_id;
 
             const { error: insertError } = await supabase.from('messages').insert([{
               from,
@@ -146,17 +206,15 @@ app.post('/webhook', async (req: Request, res: Response) => {
   }
 });
 
-// Adicionando o endpoint /ia-response de forma segura
 app.post("/ia-response", async (req: Request, res: Response) => {
-
   const tokens_usados = Number(req.body.tokens_usados);
   const user_id = String(req.body.user_id);
   const phone = String(req.body.phone);
 
-if (!tokens_usados || !user_id || !phone) {
-  console.log('[IA-RESPONSE] Dados incompletos recebidos:', { tokens_usados, user_id, phone });
-  return res.status(400).json({ error: "Dados incompletos." });
-}
+  if (!tokens_usados || !user_id || !phone) {
+    console.log('[IA-RESPONSE] Dados incompletos recebidos:', { tokens_usados, user_id, phone });
+    return res.status(400).json({ error: "Dados incompletos." });
+  }
 
   const { data: userData, error: userError } = await supabase
     .from("users")
@@ -180,20 +238,47 @@ if (!tokens_usados || !user_id || !phone) {
   }
 
   await supabase
-  .from("users")
-  .update({ ia_credits_used: ia_credits_used + tokens_usados })
-  .eq("id", user_id);
+    .from("users")
+    .update({ ia_credits_used: ia_credits_used + tokens_usados })
+    .eq("id", user_id);
 
-await supabase
-  .from("contacts")
-  .update({ ai_enabled: false })
-  .eq("phone", phone)
-  .eq("user_id", user_id);
+  await supabase
+    .from("contacts")
+    .update({ ai_enabled: false })
+    .eq("phone", phone)
+    .eq("user_id", user_id);
 
-return res.status(200).json({ success: true });
+  return res.status(200).json({ success: true });
+});
 
+app.post("/create-checkout-session", async (req: Request, res: Response) => {
+  const { priceId, user_id } = req.body;
+
+  if (!priceId || !user_id) {
+    return res.status(400).json({ error: "priceId e user_id são obrigatórios." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: process.env.SUCCESS_URL || "https://turios.com.br/sucesso",
+      cancel_url: process.env.CANCEL_URL || "https://turios.com.br/cancelado",
+      metadata: { user_id },
+    });
+
+    return res.json({ url: session.url });
+  } catch (err: any) {
+    console.error("Erro ao criar sessão do Stripe:", err.message);
+    return res.status(500).json({ error: "Erro ao criar sessão de pagamento." });
+  }
 });
 
 app.listen(port, () => {
   console.log(`Servidor webhook ativo na porta ${port}`);
+});
+
+app.post("/", (req, res) => {
+  console.log("POST recebido no /:", req.body);
+  res.json({ status: "ok", recebido: true });
 });
