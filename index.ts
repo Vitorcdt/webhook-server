@@ -277,3 +277,8 @@ app.post("/create-checkout-session", async (req: Request, res: Response) => {
 app.listen(port, () => {
   console.log(`Servidor webhook ativo na porta ${port}`);
 });
+
+app.post("/", (req, res) => {
+  console.log("POST recebido no /:", req.body);
+  res.json({ status: "ok", recebido: true });
+});
