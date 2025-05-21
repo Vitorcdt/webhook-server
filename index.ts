@@ -122,7 +122,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
             user_id = userRow.user_id;
 
             const { error: insertError } = await supabase.from('messages').insert([{
-              from,
+              from_user: from,
               to,
               content,
               created_at: timestamp,
