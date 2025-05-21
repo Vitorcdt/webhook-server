@@ -108,23 +108,6 @@ app.post('/webhook', async (req: Request, res: Response) => {
 
             console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
-            try {
-              await supabase.rpc("http_post", {
-                url: FORWARD_TO_MAKE_URL,
-                body: {
-                  from,
-                  to,
-                  content,
-                  timestamp,
-                  user_id,
-                },
-              });
-              console.log("✅ Mensagem enviada ao Make com sucesso");
-            } catch (error: any) {
-
-              console.error("❌ Erro ao enviar para o Make:", error.message);
-            }
-
             const { data: userRow } = await supabase
               .from('whatsapp_accounts')
               .select('user_id')
