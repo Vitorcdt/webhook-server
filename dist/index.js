@@ -8,10 +8,51 @@ const supabase_js_1 = require("@supabase/supabase-js");
 const dotenv_1 = __importDefault(require("dotenv"));
 const axios_1 = __importDefault(require("axios"));
 const audio_upload_1 = __importDefault(require("./routes/audio-upload"));
+const cors_1 = __importDefault(require("cors"));
+const stripe_1 = __importDefault(require("stripe"));
+const body_parser_1 = __importDefault(require("body-parser"));
 dotenv_1.default.config();
+const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: "2023-10-16",
+});
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3000;
+app.post("/stripe-webhook", body_parser_1.default.raw({ type: "application/json" }), async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    let event;
+    try {
+        event = stripe_1.default.webhooks.constructEvent(req.body, sig, endpointSecret);
+    }
+    catch (err) {
+        console.error("⚠️ Erro ao verificar assinatura do webhook:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+    if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const user_id = session.metadata?.user_id;
+        if (!user_id) {
+            console.warn("user_id ausente na sessão de pagamento.");
+            return res.status(400).send("Faltando metadata user_id");
+        }
+        await supabase
+            .from("users")
+            .update({
+            credits: 1000,
+            ia_credits_used: 0,
+            out_of_ia_credits: false,
+        })
+            .eq("id", user_id);
+        console.log("✅ Créditos recarregados para user_id:", user_id);
+    }
+    res.status(200).send("OK");
+});
 app.use(express_1.default.json());
+app.use((0, cors_1.default)({
+    origin: "https://turios-ia.vercel.app",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type"],
+}));
 app.use("/api", audio_upload_1.default);
 const supabase = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const FORWARD_TO_MAKE_URL = process.env.MAKE_WEBHOOK_URL;
@@ -45,6 +86,7 @@ app.post('/webhook', async (req, res) => {
                         const content = msg.text?.body || '[sem texto]';
                         const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
                         const msgId = msg.id;
+                        let user_id = entry.id || null;
                         console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
                         const { data: userRow } = await supabase
                             .from('whatsapp_accounts')
@@ -55,9 +97,9 @@ app.post('/webhook', async (req, res) => {
                             console.warn('user_id não encontrado para o número:', to);
                             continue;
                         }
-                        const user_id = userRow.user_id;
+                        user_id = userRow.user_id;
                         const { error: insertError } = await supabase.from('messages').insert([{
-                                from,
+                                from_number: from,
                                 to,
                                 content,
                                 created_at: timestamp,
@@ -118,7 +160,6 @@ app.post('/webhook', async (req, res) => {
         res.sendStatus(500);
     }
 });
-// Adicionando o endpoint /ia-response de forma segura
 app.post("/ia-response", async (req, res) => {
     const tokens_usados = Number(req.body.tokens_usados);
     const user_id = String(req.body.user_id);
@@ -154,6 +195,30 @@ app.post("/ia-response", async (req, res) => {
         .eq("user_id", user_id);
     return res.status(200).json({ success: true });
 });
+app.post("/create-checkout-session", async (req, res) => {
+    const { priceId, user_id } = req.body;
+    if (!priceId || !user_id) {
+        return res.status(400).json({ error: "priceId e user_id são obrigatórios." });
+    }
+    try {
+        const session = await stripe.checkout.sessions.create({
+            mode: "subscription",
+            line_items: [{ price: priceId, quantity: 1 }],
+            success_url: process.env.SUCCESS_URL || "https://turios.com.br/sucesso",
+            cancel_url: process.env.CANCEL_URL || "https://turios.com.br/cancelado",
+            metadata: { user_id },
+        });
+        return res.json({ url: session.url });
+    }
+    catch (err) {
+        console.error("Erro ao criar sessão do Stripe:", err.message);
+        return res.status(500).json({ error: "Erro ao criar sessão de pagamento." });
+    }
+});
 app.listen(port, () => {
     console.log(`Servidor webhook ativo na porta ${port}`);
+});
+app.post("/", (req, res) => {
+    console.log("POST recebido no /:", req.body);
+    res.json({ status: "ok", recebido: true });
 });
