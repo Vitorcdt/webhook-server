@@ -89,7 +89,6 @@ const result = await supabase.from('messages').insert([
     from,
     to,
     content,
-    created_at: timestamp,
     from_role: 'client',
     user_id
   }
