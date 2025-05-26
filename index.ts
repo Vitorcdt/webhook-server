@@ -92,7 +92,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
       created_at: timestamp,
       from_role: 'client',
       user_id,
-      meta_msg_id: msgId
+      
     }
   ]);
 
