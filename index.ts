@@ -84,7 +84,7 @@ app.post('/webhook', async (req: Request, res: Response) => {
   const user_id = userRow.user_id;
   console.log("📥 Tentando salvar mensagem no Supabase...");
 
-const { error: insertError } = await supabase.from('messages').insert([
+const result = await supabase.from('messages').insert([
   {
     from,
     to,
@@ -95,11 +95,8 @@ const { error: insertError } = await supabase.from('messages').insert([
   }
 ]);
 
-if (insertError) {
-  console.error('❌ Erro ao salvar mensagem:', insertError.message);
-} else {
-  console.log('✅ Mensagem do cliente salva com sucesso no Supabase.');
-}
+console.log("🧾 Resultado do insert:", result);
+
 
   await supabase.from('contacts').upsert([{
     phone: from,
