@@ -51,88 +51,98 @@ app.post('/webhook', async (req: Request, res: Response) => {
           if (!messages) continue;
 
           for (const msg of messages) {
-            const from = msg.from;
-            const to = change.value.metadata.phone_number_id;
+  const from = msg.from;
+  const to = change.value.metadata.phone_number_id;
 
-            if (from === to) {
-              console.log("Ignorando mensagem do número oficial");
-              continue;
-            }
+  if (from === to) {
+    console.log("Ignorando mensagem do número oficial");
+    continue;
+  }
 
-            const content = msg.text?.body || '[sem texto]';
-            const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
-            const msgId = msg.id;
+  const content = msg.text?.body || '[sem texto]';
+  const timestamp = new Date(Number(msg.timestamp) * 1000 - 3 * 60 * 60 * 1000).toISOString();
+  const msgId = msg.id;
 
-            console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
+  console.log('[Nova mensagem recebida]', { from, to, content, timestamp });
 
-            const { data: userRow } = await supabase
-              .from('whatsapp_accounts')
-              .select('user_id')
-              .eq('phone_number_id', to)
-              .maybeSingle();
+  const { data: userRow, error: userError } = await supabase
+    .from('whatsapp_accounts')
+    .select('user_id')
+    .eq('phone_number_id', to)
+    .maybeSingle();
 
-            if (!userRow) {
-              console.warn('user_id não encontrado para o número:', to);
-              continue;
-            }
+  if (userError) {
+    console.error('❌ Erro ao buscar user_id:', userError.message);
+    continue;
+  }
 
-            const user_id = userRow.user_id;
+  if (!userRow) {
+    console.warn('⚠️ user_id não encontrado para o número:', to);
+    continue;
+  }
 
-            const { error: insertError } = await supabase.from('messages').insert([{
-              from,
-              to,
-              content,
-              created_at: timestamp,
-              from_role: 'client',
-              user_id,
-              meta_msg_id: msgId
-            }]);
+  const user_id = userRow.user_id;
+  console.log("🔍 user_id localizado:", user_id);
 
-            if (insertError) {
-              console.error('Erro ao salvar mensagem:', insertError.message);
-            }
+  const { error: insertError } = await supabase.from('messages').insert([
+    {
+      from,
+      to,
+      content,
+      created_at: timestamp,
+      from_role: 'client',
+      user_id,
+      meta_msg_id: msgId
+    }
+  ]);
 
-            await supabase.from('contacts').upsert([{
-              phone: from,
-              name: `Cliente ${from}`,
-              user_id
-            }], {
-              onConflict: 'phone, user_id',
-              ignoreDuplicates: true
-            });
+  if (insertError) {
+    console.error('❌ Erro ao salvar mensagem:', insertError.message);
+  } else {
+    console.log('✅ Mensagem do cliente salva com sucesso no Supabase.');
+  }
 
-            const { data: contact } = await supabase
-              .from('contacts')
-              .select('name, photo_url, ai_enabled')
-              .eq('phone', from)
-              .eq('user_id', user_id)
-              .maybeSingle();
+  await supabase.from('contacts').upsert([{
+    phone: from,
+    name: `Cliente ${from}`,
+    user_id
+  }], {
+    onConflict: 'phone, user_id',
+    ignoreDuplicates: true
+  });
 
-            if (
-              FORWARD_TO_MAKE_URL &&
-              contact?.ai_enabled === true &&
-              !from.startsWith('attendant') &&
-              from !== 'attendant'
-            ) {
-              try {
-                await axios.post(FORWARD_TO_MAKE_URL, {
-                  from,
-                  to,
-                  content,
-                  timestamp,
-                  msgId,
-                  user_id,
-                  name: contact.name || `Cliente ${from}`,
-                  photo_url: contact.photo_url || null
-                });
-                console.log('Mensagem encaminhada para o Make');
-              } catch (err: any) {
-                console.error('Erro ao reenviar para o Make:', err.message || err);
-              }
-            } else {
-              console.log('IA desativada ou mensagem do atendente — não encaminhada.');
-            }
-          }
+  const { data: contact } = await supabase
+    .from('contacts')
+    .select('name, photo_url, ai_enabled')
+    .eq('phone', from)
+    .eq('user_id', user_id)
+    .maybeSingle();
+
+  if (
+    FORWARD_TO_MAKE_URL &&
+    contact?.ai_enabled === true &&
+    !from.startsWith('attendant') &&
+    from !== 'attendant'
+  ) {
+    try {
+      await axios.post(FORWARD_TO_MAKE_URL, {
+        from,
+        to,
+        content,
+        timestamp,
+        msgId,
+        user_id,
+        name: contact.name || `Cliente ${from}`,
+        photo_url: contact.photo_url || null
+      });
+      console.log('➡️ Mensagem encaminhada para o Make');
+    } catch (err: any) {
+      console.error('❌ Erro ao reenviar para o Make:', err.message || err);
+    }
+  } else {
+    console.log('ℹ️ IA desativada ou mensagem do atendente — não encaminhada.');
+  }
+}
         }
       }
 
