@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import audioUploadRouter from "./routes/audio-upload";
+import stripeRouter from "./routes/stripe";
 import cors from "cors";
 
 dotenv.config();
@@ -17,7 +18,7 @@ const app = express();
    allowedHeaders: ["Content-Type"],
  }));
   app.use("/api", audioUploadRouter);
-
+  app.use("/api", stripeRouter);
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
