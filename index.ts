@@ -152,59 +152,6 @@ console.log("🧾 Resultado do insert:", result);
   }
 });
 
-// Adicionando o endpoint /ia-response de forma segura
-app.post("/ia-response", async (req: Request, res: Response) => {
-  const tokens_usados = Number(req.body.tokens_usados);
-  const user_id = String(req.body.user_id);
-  const phone = String(req.body.phone);
-  const mensagemIA = String(req.body.resposta);
-
-  if (!tokens_usados || !user_id || !phone || !mensagemIA) {
-    console.log('[IA-RESPONSE] Dados incompletos recebidos:', { tokens_usados, user_id, phone });
-    return res.status(400).json({ error: "Dados incompletos." });
-  }
-
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("credits, ia_credits_used")
-    .eq("id", user_id)
-    .single();
-
-  if (userError || !userData) {
-    return res.status(500).json({ error: "Usuário não encontrado." });
-  }
-
-  const { credits, ia_credits_used } = userData;
-
-  if (ia_credits_used + tokens_usados > credits) {
-    await supabase
-      .from("users")
-      .update({ out_of_ia_credits: true })
-      .eq("id", user_id);
-
-    return res.status(403).json({ error: "Créditos de IA insuficientes." });
-  }
-
-  await supabase
-    .from("users")
-    .update({ ia_credits_used: ia_credits_used + tokens_usados })
-    .eq("id", user_id);
-
-  // SALVA A MENSAGEM DA IA
-  await supabase.from("messages").insert([
-    {
-      from: "agent",
-      to: phone,
-      content: mensagemIA,
-      from_role: "agent",
-      user_id,
-      is_ai: true
-    }
-  ]);
-
-  return res.status(200).json({ success: true });
-});
-
 app.post('/chat', async (req: Request, res: Response) => {
   const { agent_id, phone, message } = req.body;
 
@@ -213,15 +160,26 @@ app.post('/chat', async (req: Request, res: Response) => {
   }
 
   try {
+    // 1. Buscar prompt e user_id do agente
     const { data: agentData, error: agentError } = await supabase
       .from('agents')
-      .select('prompt')
+      .select('prompt, user_id')
       .eq('id', agent_id)
       .single();
 
     if (agentError || !agentData?.prompt) {
-      console.error('Erro ao buscar prompt do agente:', agentError);
       return res.status(404).json({ error: 'Agente IA não encontrado ou sem prompt' });
+    }
+
+    // 2. Buscar dados de créditos do usuário
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('credits, ia_credits_used')
+      .eq('id', agentData.user_id)
+      .single();
+
+    if (userError || !userData) {
+      return res.status(500).json({ error: 'Usuário não encontrado' });
     }
 
     const systemPrompt = {
@@ -229,6 +187,7 @@ app.post('/chat', async (req: Request, res: Response) => {
       content: agentData.prompt
     };
 
+    // 3. Buscar histórico de mensagens anteriores
     const { data: history, error: historyError } = await supabase
       .from('messages')
       .select('content, from_role, created_at')
@@ -239,7 +198,7 @@ app.post('/chat', async (req: Request, res: Response) => {
 
     if (historyError) {
       console.error('Erro ao buscar mensagens:', historyError);
-      return res.status(500).json({ error: 'Erro ao buscar histórico de mensagens' });
+      return res.status(500).json({ error: 'Erro ao buscar histórico' });
     }
 
     const chatHistory = history.map(msg => ({
@@ -253,6 +212,7 @@ app.post('/chat', async (req: Request, res: Response) => {
       { role: 'user', content: message }
     ];
 
+    // 4. Chamar OpenAI
     const gptResponse = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -269,10 +229,48 @@ app.post('/chat', async (req: Request, res: Response) => {
     );
 
     const reply = gptResponse.data.choices[0].message.content;
-    return res.json({ response: reply });
+    const tokensUsados = gptResponse.data.usage?.total_tokens || 0;
+
+    // 5. Verificar crédito disponível
+    if ((userData.ia_credits_used + tokensUsados) > userData.credits) {
+      await supabase
+        .from("users")
+        .update({ out_of_ia_credits: true })
+        .eq("id", agentData.user_id);
+
+      return res.status(403).json({ error: "Créditos de IA insuficientes." });
+    }
+
+    // 6. Atualizar uso de créditos
+    await supabase
+      .from("users")
+      .update({
+        ia_credits_used: userData.ia_credits_used + tokensUsados
+      })
+      .eq("id", agentData.user_id);
+
+    // 7. Salvar resposta da IA no Supabase
+    await supabase.from("messages").insert([
+      {
+        from: "agent",
+        to: phone,
+        content: reply,
+        from_role: "agent",
+        user_id: agentData.user_id,
+        is_ai: true
+      }
+    ]);
+
+    // 8. Retornar resposta
+    res.setHeader("Content-Type", "application/json");
+    return res.status(200).json({
+      response: reply,
+      tokens: tokensUsados
+    });
+
   } catch (err) {
     console.error('Erro geral:', err);
-    return res.status(500).json({ error: 'Erro ao gerar resposta da IA' });
+    return res.status(500).json({ error: 'Erro interno ao gerar resposta' });
   }
 });
 
@@ -280,5 +278,3 @@ app.post('/chat', async (req: Request, res: Response) => {
 app.listen(port, () => {
   console.log(`Servidor webhook ativo na porta ${port}`);
 });
-
-
