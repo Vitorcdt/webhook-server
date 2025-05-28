@@ -205,7 +205,80 @@ app.post("/ia-response", async (req: Request, res: Response) => {
   return res.status(200).json({ success: true });
 });
 
+app.post('/chat', async (req: Request, res: Response) => {
+  const { agent_id, phone, message } = req.body;
 
+  if (!agent_id || !phone || !message) {
+    return res.status(400).json({ error: 'agent_id, phone e message são obrigatórios' });
+  }
+
+  try {
+    const { data: agentData, error: agentError } = await supabase
+      .from('agents')
+      .select('prompt')
+      .eq('id', agent_id)
+      .single();
+
+    if (agentError || !agentData?.prompt) {
+      console.error('Erro ao buscar prompt do agente:', agentError);
+      return res.status(404).json({ error: 'Agente IA não encontrado ou sem prompt' });
+    }
+
+    const systemPrompt = {
+      role: 'system',
+      content: agentData.prompt
+    };
+
+    const { data: history, error: historyError } = await supabase
+      .from('messages')
+      .select('content, from_role, created_at')
+      .eq('to', phone)
+      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: true })
+      .limit(10);
+
+    if (historyError) {
+      console.error('Erro ao buscar mensagens:', historyError);
+      return res.status(500).json({ error: 'Erro ao buscar histórico de mensagens' });
+    }
+
+    const chatHistory = history.map(msg => ({
+      role: msg.from_role === 'client' ? 'user' : 'assistant',
+      content: msg.content
+    }));
+
+    const messages = [
+      systemPrompt,
+      ...chatHistory,
+      { role: 'user', content: message }
+    ];
+
+    const gptResponse = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-3.5',
+        messages,
+        temperature: 0.7
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const reply = gptResponse.data.choices[0].message.content;
+    return res.json({ response: reply });
+  } catch (err) {
+    console.error('Erro geral:', err);
+    return res.status(500).json({ error: 'Erro ao gerar resposta da IA' });
+  }
+});
+
+// ⬇️ Por último
 app.listen(port, () => {
   console.log(`Servidor webhook ativo na porta ${port}`);
 });
+
+
