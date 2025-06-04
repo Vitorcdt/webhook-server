@@ -159,6 +159,12 @@ app.post('/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'agent_id, phone e message são obrigatórios' });
   }
 
+  // 🛑 Ignorar mensagens disparadas pelo atendente (para evitar loop)
+  if (phone.startsWith("attendant") || phone === "attendant") {
+    console.log("⚠️ Ignorando mensagem do atendente.");
+    return res.sendStatus(200);
+  }
+
   try {
     // 1. Buscar prompt e user_id do agente
     const { data: agentData, error: agentError } = await supabase
@@ -182,12 +188,7 @@ app.post('/chat', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Usuário não encontrado' });
     }
 
-    const systemPrompt = {
-      role: 'system',
-      content: agentData.prompt
-    };
-
-    // 3. Buscar histórico de mensagens anteriores
+    // 3. Buscar histórico de mensagens
     const { data: history, error: historyError } = await supabase
       .from('messages')
       .select('content, from_role, created_at')
@@ -201,6 +202,11 @@ app.post('/chat', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Erro ao buscar histórico' });
     }
 
+    const systemPrompt = {
+      role: 'system',
+      content: agentData.prompt
+    };
+
     const chatHistory = history.map(msg => ({
       role: msg.from_role === 'client' ? 'user' : 'assistant',
       content: msg.content
@@ -212,26 +218,41 @@ app.post('/chat', async (req: Request, res: Response) => {
       { role: 'user', content: message }
     ];
 
-    // 4. Chamar OpenAI
-    const gptResponse = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages,
-        temperature: 0.7
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
+    // 4. Chamada à OpenAI protegida com try interno
+    let reply: string = "";
+    let tokensUsados: number = 0;
+
+    try {
+      const gptResponse = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-3.5-turbo',
+          messages,
+          temperature: 0.7
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      );
 
-    const reply = gptResponse.data.choices[0].message.content;
-    const tokensUsados = gptResponse.data.usage?.total_tokens || 0;
+      reply = gptResponse.data.choices?.[0]?.message?.content?.trim() || "";
+      tokensUsados = gptResponse.data.usage?.total_tokens || 0;
 
-    // 5. Verificar crédito disponível
+    } catch (error: any) {
+      console.error("❌ Erro ao chamar OpenAI:", error.response?.data || error.message);
+      return res.status(500).json({ error: "Erro ao gerar resposta com IA" });
+    }
+
+    // 5. Verificação de resposta nula ou vazia
+    if (!reply || reply.length < 2) {
+      console.warn("⚠️ Resposta da IA vazia ou inválida.");
+      return res.status(500).json({ error: "Resposta da IA vazia." });
+    }
+
+    // 6. Verificar créditos
     if ((userData.ia_credits_used + tokensUsados) > userData.credits) {
       await supabase
         .from("users")
@@ -241,7 +262,7 @@ app.post('/chat', async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Créditos de IA insuficientes." });
     }
 
-    // 6. Atualizar uso de créditos
+    // 7. Atualizar uso de créditos
     await supabase
       .from("users")
       .update({
@@ -249,7 +270,7 @@ app.post('/chat', async (req: Request, res: Response) => {
       })
       .eq("id", agentData.user_id);
 
-    // 7. Salvar resposta da IA no Supabase
+    // 8. Salvar resposta no Supabase
     await supabase.from("messages").insert([
       {
         from: "agent",
@@ -261,15 +282,14 @@ app.post('/chat', async (req: Request, res: Response) => {
       }
     ]);
 
-    // 8. Retornar resposta
-    res.setHeader("Content-Type", "application/json");
+    // 9. Retornar resposta
     return res.status(200).json({
       response: reply,
       tokens: tokensUsados
     });
 
   } catch (err) {
-    console.error('Erro geral:', err);
+    console.error('Erro geral no /chat:', err);
     return res.status(500).json({ error: 'Erro interno ao gerar resposta' });
   }
 });
